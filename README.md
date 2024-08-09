@@ -9,6 +9,7 @@ npm run dev
 npm i langchain
 npm i @langchain/openai
 npm i @langchain/core
+npm install cheerio
 # or
 yarn dev
 # or

@@ -16,9 +16,9 @@ import { AIMessage } from "@langchain/core/messages";
 import { InMemoryChatMessageHistory } from "@langchain/core/dist/chat_history";
 import { RunnableWithMessageHistory, RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { PromptTemplate } from "@langchain/core/prompts";
 
 // const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs."
-const history_length = 10;
 
 const loader = new CheerioWebBaseLoader("url");
 const docs = await loader.load();
@@ -38,78 +38,92 @@ const retriever = vectorStore.asRetriever();
 const systemPrompt = pull<ChatPromptTemplate>("rlm/rag-prompt");
 
 export async function POST(req) {
+  try {
+    const user_question = await req.json();
+    const parser = new StringOutputParser();
 
-  const parser = new StringOutputParser();
-  
-  const model = new ChatOpenAI({
-    model: "gpt-3.5-turbo",
-    temperature: 0.3
-  });
-
-  const messageHistories = {}; // messageHistories is of type Record<string, InMemoryChatMessageHistory>
-
-  const prompt = ChatPromptTemplate.fromMessages([
-    [
-      "system",
-      systemPrompt,
-    ],
-    ["placeholder", "{chat_history}"],
-    ["human", "{user_input}"],
-  ]);
+    const model = new ChatOpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      model: "gpt-3.5-turbo",
+      temperature: 0.3
+    });
     
-  // The following config should be passed into the runnable every time.
-  // The config contains information that isn't part of the input directly, but is still useful
-  const config = {
-    configurable: {
-      sessionId: "abc2",
-    },
-  };
+    const messageHistories = {}; // messageHistories is of type Record<string, InMemoryChatMessageHistory>
+    
+    const prompt = ChatPromptTemplate.fromMessages([
+      [
+        "system",
+        systemPrompt,
+      ],
+      ["placeholder", "{chat_history}"],
+      ["human", "{user_input}"],
+    ]);
+    
+    // The following config should be passed into the runnable every time.
+    // The config contains information that isn't part of the input directly, but is still useful
+    const config = {
+      configurable: {
+        sessionId: "abc2",
+      },
+    };
 
-  class ChainInput {
-    constructor(chat_history = new BaseMessage(), input = "") {
-      this.chat_history = chat_history;
-      this.input = input;
-    }
-  }
-  const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(history_length); // some_chain_inp is type ChainInput
-  
-  const chain = RunnableSequence.from<ChainInput>([
-    RunnablePassthrough.assign({
-      chat_history: filterMessages,
-    }),
-    prompt,
-    model,
-  ]);
-  //const chain = prompt.pipe(model);
-  
-  const withMessageHistory = new RunnableWithMessageHistory({
-    runnable: chain,
-    getMessageHistory: async (sessionId) => { // sessionId is used to distiguish between separate conversations
-      if (messageHistories[sessionId] === undefined) {
-        messageHistories[sessionId] = new InMemoryChatMessageHistory();
+    /* ************************************************************************************************************ */
+    /* ********** The below code is for removing chat history after a certain number of messages ****************** */
+    /* ************************************************************************************************************ */
+    const history_length = 10;
+    class ChainInput {
+      constructor(chat_history = new BaseMessage(), input = "") {
+        this.chat_history = chat_history;
+        this.input = input;
       }
-      return messageHistories[sessionId];
-    },
-    inputMessagesKey: "user_input",
-    historyMessagesKey: "chat_history",
-  });
-
-  const user_question = "What's my name?";
-
-  const stream = await withMessageHistory.stream(
-    {
-      user_input: user_question
-    },
-    config
-  );
-
-  for await (const chunk of stream) {
-    const content = chunk.content;
-    if (content) {
-
     }
+    const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(history_length); // some_chain_inp is type ChainInput
+    /* ************************************************************************************************************ */
+    /* ************************************************************************************************************ */
+    /* ************************************************************************************************************ */
+    
+    const chain = RunnableSequence.from<ChainInput>([
+      RunnablePassthrough.assign({
+        chat_history: filterMessages,
+      }),
+      prompt,
+      model,
+    ]);
+    //const chain = prompt.pipe(model);
+    
+    const withMessageHistory = new RunnableWithMessageHistory({
+      runnable: chain,
+      getMessageHistory: async (sessionId) => { // sessionId is used to distiguish between separate conversations
+        if (messageHistories[sessionId] === undefined) {
+          messageHistories[sessionId] = new InMemoryChatMessageHistory();
+        }
+        return messageHistories[sessionId];
+      },
+      inputMessagesKey: "user_input",
+      historyMessagesKey: "chat_history",
+    });
+    
+    const stream = await withMessageHistory.stream(
+      {
+        user_input: user_question
+      },
+      config
+    );
+    
+    return new StreamingTextResponse(stream.pipeThrough(createStreamDataTransformer()), );
+  } catch (e) {
+      return Response.json({error: e.message}, {status: e.status});
   }
-
+    
+    
+    
+    
+    
+    /* Code from the YouTube tutorial:
+    https://www.youtube.com/watch?v=YLagvzoWCL0
+    */
+   const dynamic = "force-dynamic";
+   
 
 
 
