@@ -8,6 +8,7 @@ import { pull } from "langchain/hub";
 import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
 import { StreamingTextResponse, createStreamDataTransformer } from "ai";
 import { HttpResponseOutputParser } from "langchain/output_parsers";
+import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { BaseMessage } from "@langchain/core/messages";
@@ -16,8 +17,25 @@ import { InMemoryChatMessageHistory } from "@langchain/core/dist/chat_history";
 import { RunnableWithMessageHistory, RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 
-const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs."
+// const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs."
 const history_length = 10;
+
+const loader = new CheerioWebBaseLoader("url");
+const docs = await loader.load();
+
+const textSplitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 1000,
+  chunkOverlap: 200,
+});
+const splits = await textSplitter.splitDocuments(docs);
+const vectorStore = await MemoryVectorStore.fromDocuments(
+  splits,
+  new OpenAIEmbeddings()
+);
+
+// Retrieve and generate using the relevant snippets of the blog.
+const retriever = vectorStore.asRetriever();
+const systemPrompt = pull<ChatPromptTemplate>("rlm/rag-prompt");
 
 export async function POST(req) {
 
