@@ -1,9 +1,107 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import "cheerio";
+import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
+import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { pull } from "langchain/hub";
+import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
+import { StreamingTextResponse, createStreamDataTransformer } from "ai";
+import { HttpResponseOutputParser } from "langchain/output_parsers";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { BaseMessage } from "@langchain/core/messages";
+import { AIMessage } from "@langchain/core/messages";
+import { InMemoryChatMessageHistory } from "@langchain/core/dist/chat_history";
+import { RunnableWithMessageHistory, RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
 
 const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs."
+const history_length = 10;
 
 export async function POST(req) {
+
+  const parser = new StringOutputParser();
+  
+  const model = new ChatOpenAI({
+    model: "gpt-3.5-turbo",
+    temperature: 0.3
+  });
+
+  const messageHistories = {}; // messageHistories is of type Record<string, InMemoryChatMessageHistory>
+
+  const prompt = ChatPromptTemplate.fromMessages([
+    [
+      "system",
+      systemPrompt,
+    ],
+    ["placeholder", "{chat_history}"],
+    ["human", "{user_input}"],
+  ]);
+    
+  // The following config should be passed into the runnable every time.
+  // The config contains information that isn't part of the input directly, but is still useful
+  const config = {
+    configurable: {
+      sessionId: "abc2",
+    },
+  };
+
+  class ChainInput {
+    constructor(chat_history = new BaseMessage(), input = "") {
+      this.chat_history = chat_history;
+      this.input = input;
+    }
+  }
+  const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(history_length); // some_chain_inp is type ChainInput
+  
+  const chain = RunnableSequence.from<ChainInput>([
+    RunnablePassthrough.assign({
+      chat_history: filterMessages,
+    }),
+    prompt,
+    model,
+  ]);
+  //const chain = prompt.pipe(model);
+  
+  const withMessageHistory = new RunnableWithMessageHistory({
+    runnable: chain,
+    getMessageHistory: async (sessionId) => { // sessionId is used to distiguish between separate conversations
+      if (messageHistories[sessionId] === undefined) {
+        messageHistories[sessionId] = new InMemoryChatMessageHistory();
+      }
+      return messageHistories[sessionId];
+    },
+    inputMessagesKey: "user_input",
+    historyMessagesKey: "chat_history",
+  });
+
+  const user_question = "What's my name?";
+
+  const stream = await withMessageHistory.stream(
+    {
+      user_input: user_question
+    },
+    config
+  );
+
+  for await (const chunk of stream) {
+    const content = chunk.content;
+    if (content) {
+
+    }
+  }
+
+
+
+
+
+
+
+
+    
+    
+    /*
     const openai = new OpenAI(process.env.OPENAI_API_KEY);
     const data = await req.json();
     
@@ -35,4 +133,5 @@ export async function POST(req) {
     })
 
     return new NextResponse(stream) // Return the stream as the response
+    */
 }

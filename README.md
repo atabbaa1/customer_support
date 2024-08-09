@@ -6,6 +6,9 @@ First, run the development server:
 
 ```bash
 npm run dev
+npm i langchain
+npm i @langchain/openai
+npm i @langchain/core
 # or
 yarn dev
 # or
