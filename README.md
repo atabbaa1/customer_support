@@ -5,11 +5,12 @@ This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next
 First, run the development server:
 
 ```bash
+npm install langchain
+npm install @langchain/openai
+npm install @langchain/core
+npm install @langchain/community
+npm install @langchain/
 npm run dev
-npm i langchain
-npm i @langchain/openai
-npm i @langchain/core
-npm install cheerio
 # or
 yarn dev
 # or

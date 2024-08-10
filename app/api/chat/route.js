@@ -1,26 +1,27 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import "cheerio";
-import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
-import { pull } from "langchain/hub";
-import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
-import { StreamingTextResponse, createStreamDataTransformer } from "ai";
-import { HttpResponseOutputParser } from "langchain/output_parsers";
-import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
+// import "cheerio";
+// import { CheerioWebBaseLoader } from "@langchain/community/document_loaders/web/cheerio";
+// import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+// import { MemoryVectorStore } from "langchain/vectorstores/memory";
+// import { pull } from "langchain/hub";
+// import { CSVLoader } from "@langchain/community/document_loaders/fs/csv";
+// import { StreamingTextResponse, createStreamDataTransformer } from "ai";
+// import { HttpResponseOutputParser } from "langchain/output_parsers";
+// import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
 import { BaseMessage } from "@langchain/core/messages";
-import { AIMessage } from "@langchain/core/messages";
-import { InMemoryChatMessageHistory } from "@langchain/core/dist/chat_history";
+// import { AIMessage } from "@langchain/core/messages";
+import { InMemoryChatMessageHistory } from "@langchain/core/chat_history";
 import { RunnableWithMessageHistory, RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
-import { PromptTemplate } from "@langchain/core/prompts";
+// import { PromptTemplate } from "@langchain/core/prompts";
 
-// const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs."
+const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs. Only answer questions based off what you know. Do not make up information."
 
-const loader = new CheerioWebBaseLoader("url");
+/*
+const loader = new CheerioWebBaseLoader("https://abdulrahmantabbaa.com");
 const docs = await loader.load();
 
 const textSplitter = new RecursiveCharacterTextSplitter({
@@ -36,19 +37,24 @@ const vectorStore = await MemoryVectorStore.fromDocuments(
 // Retrieve and generate using the relevant snippets of the blog.
 const retriever = vectorStore.asRetriever();
 const systemPrompt = pull<ChatPromptTemplate>("rlm/rag-prompt");
+*/
+const messageHistories = {}; // messageHistories is of type Record<string, InMemoryChatMessageHistory>
 
+const model = new ChatOpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  model: "gpt-3.5-turbo",
+  temperature: 0.3
+});
 export async function POST(req) {
-  try {
-    const user_question = await req.json();
-    const parser = new StringOutputParser();
+  let user_question = await req.json();
+  user_question = user_question[user_question.length-1].content; // Retrieve the laast message
+  console.log(user_question);
+  const parser = new StringOutputParser();
+  
 
-    const model = new ChatOpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-      model: "gpt-3.5-turbo",
-      temperature: 0.3
-    });
-    
-    const messageHistories = {}; // messageHistories is of type Record<string, InMemoryChatMessageHistory>
+  console.log("Before the try statement!");
+  
+  try {
     
     const prompt = ChatPromptTemplate.fromMessages([
       [
@@ -61,36 +67,37 @@ export async function POST(req) {
     
     // The following config should be passed into the runnable every time.
     // The config contains information that isn't part of the input directly, but is still useful
+    // and necessary for maintaining conversation history
+    // The sessionId is a unique identifier for each conversation
     const config = {
       configurable: {
         sessionId: "abc2",
       },
     };
+    console.log("Before limiting chat history");
 
     /* ************************************************************************************************************ */
     /* ********** The below code is for removing chat history after a certain number of messages ****************** */
     /* ************************************************************************************************************ */
-    const history_length = 10;
-    class ChainInput {
-      constructor(chat_history = new BaseMessage(), input = "") {
-        this.chat_history = chat_history;
-        this.input = input;
-      }
-    }
-    const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(history_length); // some_chain_inp is type ChainInput
-    /* ************************************************************************************************************ */
-    /* ************************************************************************************************************ */
-    /* ************************************************************************************************************ */
-    
-    const chain = RunnableSequence.from<ChainInput>([
+    const history_length = 30;
+    const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(-1*history_length); // some_chain_inp is type ChainInput
+    console.log("Before the RunnableSequence from ChainInput");
+
+    const chain = RunnableSequence.from([
       RunnablePassthrough.assign({
         chat_history: filterMessages,
       }),
       prompt,
       model,
     ]);
-    //const chain = prompt.pipe(model);
+    /* ************************************************************************************************************ */
+    /* ************************************************************************************************************ */
+    /* ************************************************************************************************************ */
+    console.log("After the RunnableSequence from ChainInput");
     
+    // const chain = prompt.pipe(model);
+    
+
     const withMessageHistory = new RunnableWithMessageHistory({
       runnable: chain,
       getMessageHistory: async (sessionId) => { // sessionId is used to distiguish between separate conversations
@@ -102,17 +109,20 @@ export async function POST(req) {
       inputMessagesKey: "user_input",
       historyMessagesKey: "chat_history",
     });
+
+    console.log("Before invoking withMessageHistory");
     
-    const stream = await withMessageHistory.stream(
+    const stream = await withMessageHistory.invoke(
       {
         user_input: user_question
       },
       config
     );
+    // console.log(stream.content);
     
-    return new StreamingTextResponse(stream.pipeThrough(createStreamDataTransformer()), );
+    return new NextResponse(stream.content);
   } catch (e) {
-      return Response.json({error: e.message}, {status: e.status});
+    return Response.json({error: e.message}, {status: e.status});
   }
     
     
@@ -122,7 +132,6 @@ export async function POST(req) {
     /* Code from the YouTube tutorial:
     https://www.youtube.com/watch?v=YLagvzoWCL0
     */
-   const dynamic = "force-dynamic";
    
 
 
