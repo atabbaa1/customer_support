@@ -16,7 +16,18 @@ import { BaseMessage } from "@langchain/core/messages";
 import { InMemoryChatMessageHistory } from "@langchain/core/chat_history";
 import { RunnableWithMessageHistory, RunnablePassthrough, RunnableSequence } from "@langchain/core/runnables";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
-// import { PromptTemplate } from "@langchain/core/prompts";
+
+import formidable from "formidable";
+import fs from "fs";
+import path from "path";
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+const uploadDir = path.join(process.cwd(), '/uploads');
 
 const systemPrompt = "You are a friendly, customer support representative. You assist users with their needs. Only answer questions based off what you know. Do not make up information."
 
@@ -45,86 +56,112 @@ const model = new ChatOpenAI({
   model: "gpt-3.5-turbo",
   temperature: 0.3
 });
+
 export async function POST(req) {
+  
   let user_question = await req.json();
-  user_question = user_question[user_question.length-1].content; // Retrieve the laast message
-  console.log(user_question);
-  const parser = new StringOutputParser();
-  
+  console.log(`User question is ${user_question}`);
+  console.log(`user_question[files] is ${user_question[files]}`)
 
-  console.log("Before the try statement!");
-  
-  try {
-    
-    const prompt = ChatPromptTemplate.fromMessages([
-      [
-        "system",
-        systemPrompt,
-      ],
-      ["placeholder", "{chat_history}"],
-      ["human", "{user_input}"],
-    ]);
-    
-    // The following config should be passed into the runnable every time.
-    // The config contains information that isn't part of the input directly, but is still useful
-    // and necessary for maintaining conversation history
-    // The sessionId is a unique identifier for each conversation
-    const config = {
-      configurable: {
-        sessionId: "abc2",
-      },
-    };
-    console.log("Before limiting chat history");
-
-    /* ************************************************************************************************************ */
-    /* ********** The below code is for removing chat history after a certain number of messages ****************** */
-    /* ************************************************************************************************************ */
-    const history_length = 30;
-    const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(-1*history_length); // some_chain_inp is type ChainInput
-    console.log("Before the RunnableSequence from ChainInput");
-
-    const chain = RunnableSequence.from([
-      RunnablePassthrough.assign({
-        chat_history: filterMessages,
-      }),
-      prompt,
-      model,
-    ]);
-    /* ************************************************************************************************************ */
-    /* ************************************************************************************************************ */
-    /* ************************************************************************************************************ */
-    console.log("After the RunnableSequence from ChainInput");
-    
-    // const chain = prompt.pipe(model);
-    
-
-    const withMessageHistory = new RunnableWithMessageHistory({
-      runnable: chain,
-      getMessageHistory: async (sessionId) => { // sessionId is used to distiguish between separate conversations
-        if (messageHistories[sessionId] === undefined) {
-          messageHistories[sessionId] = new InMemoryChatMessageHistory();
-        }
-        return messageHistories[sessionId];
-      },
-      inputMessagesKey: "user_input",
-      historyMessagesKey: "chat_history",
+  if (user_question instanceof formData) { // Some way of determining file upload from text entry
+    // const filepath = user_question[user_question.length-1].file;
+    // console.log(`Filepath is ${filepath}`);
+    const form = new formidable.IncomingForm({
+      uploadDir,
+      keepExtensions: true,
     });
 
-    console.log("Before invoking withMessageHistory");
+    form.parse(req, (err, fields, files) => {
+      if (err) {
+        return res.status(500).json({ error: 'Failed to upload file' });
+      }
+
+      const uploadedFiles = Object.values(files).map((file) => {
+        return {
+          filename: path.basename(file.filepath),
+          filepath: file.filepath,
+        };
+      });
+
+      res.status(200).json({ uploadedFiles });
+    })
+  } else {
+    user_question = user_question[user_question.length-1].content; // Retrieve the laast message
+    console.log(user_question);
+    const parser = new StringOutputParser();
     
-    const stream = await withMessageHistory.invoke(
-      {
-        user_input: user_question
-      },
-      config
-    );
-    // console.log(stream.content);
     
-    return new NextResponse(stream.content);
-  } catch (e) {
-    return Response.json({error: e.message}, {status: e.status});
+    console.log("Before the try statement!");
+    
+    try {
+    
+      const prompt = ChatPromptTemplate.fromMessages([
+        [
+          "system",
+          systemPrompt,
+        ],
+        ["placeholder", "{chat_history}"],
+        ["human", "{user_input}"],
+      ]);
+      
+      // The following config should be passed into the runnable every time.
+      // The config contains information that isn't part of the input directly, but is still useful
+      // and necessary for maintaining conversation history
+      // The sessionId is a unique identifier for each conversation
+      const config = {
+        configurable: {
+          sessionId: "abc2",
+        },
+      };
+      console.log("Before limiting chat history");
+      
+      /* ************************************************************************************************************ */
+      /* ********** The below code is for removing chat history after a certain number of messages ****************** */
+      /* ************************************************************************************************************ */
+      const history_length = 30;
+      const filterMessages = (some_chain_inp) => some_chain_inp.chat_history.slice(-1*history_length); // some_chain_inp is type ChainInput
+      console.log("Before the RunnableSequence from ChainInput");
+      
+      const chain = RunnableSequence.from([
+        RunnablePassthrough.assign({
+          chat_history: filterMessages,
+        }),
+        prompt,
+        model,
+      ]);
+      /* ************************************************************************************************************ */
+      /* ************************************************************************************************************ */
+      /* ************************************************************************************************************ */
+      console.log("After the RunnableSequence from ChainInput");
+      
+      const withMessageHistory = new RunnableWithMessageHistory({
+        runnable: chain,
+        getMessageHistory: async (sessionId) => { // sessionId is used to distiguish between separate conversations
+          if (messageHistories[sessionId] === undefined) {
+            messageHistories[sessionId] = new InMemoryChatMessageHistory();
+          }
+          return messageHistories[sessionId];
+        },
+        inputMessagesKey: "user_input",
+        historyMessagesKey: "chat_history",
+      });
+      
+      console.log("Before invoking withMessageHistory");
+      
+      const stream = await withMessageHistory.invoke(
+        {
+          user_input: user_question
+        },
+        config
+      );
+      // console.log(stream.content);
+      
+      return new NextResponse(stream.content);
+    } catch (e) {
+      return Response.json({error: e.message}, {status: e.status});
+    }
   }
-    
+  
     
     
     

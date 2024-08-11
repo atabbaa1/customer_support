@@ -10,6 +10,9 @@ npm install @langchain/openai
 npm install @langchain/core
 npm install @langchain/community
 npm install @langchain/
+npm install @mui/material @emotion/react @emotion/styled
+npm install formidable
+
 npm run dev
 # or
 yarn dev
